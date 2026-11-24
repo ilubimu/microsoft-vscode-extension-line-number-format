@@ -29,16 +29,18 @@
 
 ## 安装
 
-扩展通过 **GitHub Releases** 分发（暂未发布到 Marketplace）。
+扩展通过 **GitHub Releases** 分发（暂未发布到 Marketplace）。最新 Release 可能落后于 `main`；`main` 当前是 0.4.4 源码。
 
 1. 打开 [Latest Release](https://github.com/ilubimu/microsoft-vscode-extension-line-number-format/releases/latest)。
-2. 下载 `line-number-format-0.4.4.vsix`。
+2. 下载其中的 `.vsix`（目前是 `line-number-format-0.4.3.vsix`）。
 3. VS Code → 扩展视图 → 右上角 `...` → **Install from VSIX...**，选择该文件。
 4. 或命令行：
 
    ```bash
-   code --install-extension line-number-format-0.4.4.vsix
+   code --install-extension line-number-format-0.4.3.vsix
    ```
+
+如需从 `main` 构建当前 0.4.4 源码，请使用[开发与测试](#开发与测试)中的打包命令。
 
 要求：**VS Code 1.80 或更高**（在 Windows 的 1.147 上测试）。如提示重载窗口，重载即可。
 

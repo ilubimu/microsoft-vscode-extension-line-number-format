@@ -33,16 +33,18 @@ The mode is global, persisted in `lineNumberFormat.mode`, and applies to every t
 
 ## Install
 
-This extension is distributed through **GitHub Releases** (not the Marketplace).
+This extension is distributed through **GitHub Releases** (not the Marketplace). The latest published release may lag behind `main`; the source on `main` is version 0.4.4.
 
 1. Open the [latest release](https://github.com/ilubimu/microsoft-vscode-extension-line-number-format/releases/latest).
-2. Download `line-number-format-0.4.4.vsix`.
+2. Download the attached `.vsix` (currently `line-number-format-0.4.3.vsix`).
 3. In VS Code, open **Extensions** → `...` → **Install from VSIX...** and select the file.
 4. Or install from a terminal:
 
    ```bash
-   code --install-extension line-number-format-0.4.4.vsix
+   code --install-extension line-number-format-0.4.3.vsix
    ```
+
+To build the current 0.4.4 source from `main`, use the packaging commands under [Development](#development).
 
 Requirements: **VS Code 1.80 or newer** (tested with 1.147 on Windows). Reload the window if VS Code asks.
 
