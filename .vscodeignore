@@ -1,0 +1,7 @@
+test/**
+test-output/**
+tools/**
+dist/**
+_test-runtime/**
+*.vsix
+**/*.map

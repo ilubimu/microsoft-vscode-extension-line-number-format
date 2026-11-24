@@ -1,0 +1,18 @@
+Line number format test fixture
+===============================
+
+This plain text file exercises the extension in a file type with no language
+support. Every line should receive a decimal, hexadecimal, or combined label,
+depending on the selected mode.
+
+The quick brown fox jumps over the lazy dog.
+Pack my box with five dozen liquor jugs.
+Sphinx of black quartz, judge my vow.
+How vexingly quick daft zebras jump!
+
+Empty line follows.
+
+Numbers: 1 2 3 5 8 13 21 34 55 89 144 233 377 610 987 1597 2584 4181.
+Addresses: 0x1000 0x2000 0xDEADBEEF 0xCAFEBABE.
+
+The last line is here.

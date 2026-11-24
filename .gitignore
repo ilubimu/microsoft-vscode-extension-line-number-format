@@ -1,0 +1,7 @@
+dist/
+test-output/
+_test-runtime/
+node_modules/
+*.vsix
+.DS_Store
+Thumbs.db

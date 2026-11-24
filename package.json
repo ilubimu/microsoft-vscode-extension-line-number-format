@@ -1,0 +1,137 @@
+{
+  "name": "line-number-format",
+  "displayName": "Line Number Format (Decimal / Hexadecimal)",
+  "description": "Choose how editor line numbers are shown: decimal only, hexadecimal only, or decimal and hexadecimal together.",
+  "version": "0.4.3",
+  "publisher": "local-tools",
+  "license": "MIT",
+  "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ilubimu/microsoft-vscode-extension-line-number-format.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ilubimu/microsoft-vscode-extension-line-number-format/issues"
+  },
+  "homepage": "https://github.com/ilubimu/microsoft-vscode-extension-line-number-format#readme",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "line numbers",
+    "hexadecimal",
+    "hex",
+    "decimal",
+    "assembly",
+    "address",
+    "gutter"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./src/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": true
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "lineNumberFormat.showMenu",
+        "category": "Line Number Format",
+        "title": "Choose Display Mode"
+      },
+      {
+        "command": "lineNumberFormat.decimal",
+        "category": "Line Number Format",
+        "title": "Use Decimal Line Numbers"
+      },
+      {
+        "command": "lineNumberFormat.hex",
+        "category": "Line Number Format",
+        "title": "Use Hexadecimal Line Numbers"
+      },
+      {
+        "command": "lineNumberFormat.both",
+        "category": "Line Number Format",
+        "title": "Use Decimal + Hexadecimal Line Numbers"
+      },
+      {
+        "command": "lineNumberFormat.showDiagnostics",
+        "category": "Line Number Format",
+        "title": "Show Diagnostics"
+      }
+    ],
+    "configuration": {
+      "title": "Line Number Format",
+      "properties": {
+        "lineNumberFormat.mode": {
+          "type": "string",
+          "enum": [
+            "decimal",
+            "hex",
+            "both"
+          ],
+          "enumDescriptions": [
+            "Use VS Code's native decimal gutter numbers (zero rendering overhead).",
+            "Replace line numbers with zero-padded hexadecimal values.",
+            "Show decimal and hexadecimal values together in one column."
+          ],
+          "default": "decimal",
+          "scope": "window",
+          "description": "How line numbers are displayed."
+        },
+        "lineNumberFormat.hexPrefix": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "Prefix hexadecimal numbers with \"0x\"."
+        },
+        "lineNumberFormat.hexUppercase": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "Use uppercase A-F digits in hexadecimal numbers."
+        },
+        "lineNumberFormat.hexPad": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "Zero-pad hexadecimal numbers to a fixed width based on the document's line count."
+        },
+        "lineNumberFormat.showSeparators": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "Show a vertical bar between decimal and hexadecimal values, and between the label column and the code."
+        },
+        "lineNumberFormat.activeLineHighlight": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "Color the current line's label with the active line-number color."
+        },
+        "lineNumberFormat.gap": {
+          "type": "number",
+          "default": 2,
+          "minimum": 0,
+          "maximum": 8,
+          "scope": "window",
+          "description": "Empty character cells between the label column and the code."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test:unit": "node test/unit/run.js",
+    "test:visual": "node test/visual/run-visual-test.js",
+    "test:vsix": "node test/visual/run-vsix-test.js",
+    "build:vsix": "node tools/build-vsix.js"
+  }
+}
