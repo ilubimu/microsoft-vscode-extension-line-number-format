@@ -15,10 +15,18 @@ const MODE_SHORT = {
   both: 'Dec+Hex',
 };
 
-// Coalesce bursts of scroll events into one update per frame. Cursor moves
-// render immediately (selection events), so the current-line highlight stays
-// responsive; only high-frequency visible-range events are throttled.
+// Coalesce bursts of visible-range and selection events into one update per
+// frame. The current-line highlight still updates within a frame, while rapid
+// mode switches and drag-selection cannot enqueue an unbounded render backlog.
 const RENDER_INTERVAL_MS = 16;
+// Rapid mode changes (status-bar menu, command palette) must not each write
+// settings.json. Debounce the write so a burst becomes one update.
+const MODE_PERSIST_DEBOUNCE_MS = 150;
+// Even when the user keeps switching every few hundred milliseconds, do not
+// write settings.json more than about twice a second.
+const MODE_PERSIST_MIN_INTERVAL_MS = 500;
+// Ignore configuration events caused by our own writes while they settle.
+const MODE_EVENT_SETTLE_MS = 1500;
 // Safety net for a missed/late visible-range event after a far mouse jump.
 // This must run for unfocused windows too: Windows can scroll an inactive
 // VS Code window under the pointer, and those visible-range events can be
@@ -46,11 +54,20 @@ let statusBar = null;
 let renderTimer = null;
 /** @type {NodeJS.Timeout | null} */
 let visiblePoll = null;
-/** Mode we just wrote; guards against stale configuration events. */
-let pendingMode = null;
+/** A mode/style change needs a full editor pass on the next frame. */
+let fullRefreshRequested = false;
+/** Debounced settings write for rapid mode switches. */
 /** @type {NodeJS.Timeout | null} */
-let pendingModeTimer = null;
+let persistTimer = null;
+/** @type {string | null} */
+let persistTarget = null;
+let persistRunning = false;
+let lastPersistAt = 0;
+/** Ignore mode configuration events caused by our own settings write. */
+let suppressModeEventsUntil = 0;
 const scheduled = new Set();
+/** Latest selection anchor per editor, used when a scheduled render runs. */
+const focusLines = new Map();
 
 const tracked = new Set();
 /** Editors whose native line numbers this extension switched off. */
@@ -64,6 +81,10 @@ const editorStates = new WeakMap();
 
 const stats = {
   renders: 0,
+  fullRefreshes: 0,
+  modeChanges: 0,
+  configEvents: 0,
+  persistWrites: 0,
   lastMs: 0,
   lastLines: 0,
   lastAt: 0,
@@ -424,24 +445,73 @@ function renderSafe(editor, focusLine) {
   }
 }
 
-function scheduleRender(editor) {
-  if (mode === 'decimal') return;
-  if (!editor || editor.document.isClosed) return;
-  scheduled.add(editor);
+function requestFrame() {
   if (renderTimer === null) {
     renderTimer = setTimeout(flushScheduled, RENDER_INTERVAL_MS);
   }
 }
 
+function scheduleRender(editor, focusLine) {
+  if (mode === 'decimal') return;
+  if (!editor || editor.document.isClosed) return;
+  scheduled.add(editor);
+  if (typeof focusLine === 'number') focusLines.set(editor, focusLine);
+  requestFrame();
+}
+
+/**
+ * A mode/style change invalidates the whole visible label set. Never render it
+ * synchronously: rapid mode switching must collapse into one pass on the next
+ * frame instead of one full decoration update (and one settings write) per
+ * click.
+ */
+function scheduleFullRefresh() {
+  fullRefreshRequested = true;
+  requestFrame();
+}
+
+function applyModeToEditor(editor, isVisible) {
+  if (mode === 'decimal') {
+    restoreNativeLineNumbers(editor);
+    clearDecorations(editor);
+    return;
+  }
+
+  hideNativeLineNumbers(editor);
+  // Hidden editors keep their decorations until they are shown again; setting
+  // a decoration range on every tracked editor would multiply work for splits
+  // and tabs that are not on screen.
+  if (isVisible) renderSafe(editor);
+}
+
 function flushScheduled() {
   renderTimer = null;
-  const editors = Array.from(scheduled);
+  const full = fullRefreshRequested;
+  fullRefreshRequested = false;
+
+  const editors = new Set(scheduled);
   scheduled.clear();
+
   const visible = vscode.window.visibleTextEditors;
+  const visibleSet = new Set(visible);
+  if (full) {
+    for (const editor of tracked) editors.add(editor);
+    for (const editor of visible) editors.add(editor);
+    stats.fullRefreshes++;
+  }
+
   for (const editor of editors) {
-    if (editor.document.isClosed) continue;
-    if (!visible.includes(editor)) continue;
-    renderSafe(editor);
+    if (!editor || editor.document.isClosed) {
+      tracked.delete(editor);
+      focusLines.delete(editor);
+      continue;
+    }
+    if (full) {
+      applyModeToEditor(editor, visibleSet.has(editor));
+    } else if (mode !== 'decimal' && visibleSet.has(editor)) {
+      renderSafe(editor, focusLines.get(editor));
+    }
+    focusLines.delete(editor);
   }
 }
 
@@ -478,45 +548,61 @@ function syncVisibleEditors() {
   const current = new Set(visible);
 
   for (const editor of Array.from(tracked)) {
-    if (!current.has(editor)) tracked.delete(editor);
-  }
-
-  for (const editor of visible) {
-    tracked.add(editor);
-    if (mode === 'decimal') {
-      restoreNativeLineNumbers(editor);
-      clearDecorations(editor);
-    } else {
-      hideNativeLineNumbers(editor);
-      renderSafe(editor);
+    if (!current.has(editor)) {
+      tracked.delete(editor);
+      focusLines.delete(editor);
     }
   }
+
+  for (const editor of visible) tracked.add(editor);
+  if (visible.length > 0) scheduleFullRefresh();
 }
 
 function refreshAll() {
   updateStatusBar();
+  scheduleFullRefresh();
+}
 
-  scheduled.clear();
-  if (renderTimer !== null) {
-    clearTimeout(renderTimer);
-    renderTimer = null;
-  }
+function schedulePersistMode(next) {
+  persistTarget = next;
+  if (persistTimer !== null) clearTimeout(persistTimer);
+  const sinceLastWrite = Date.now() - lastPersistAt;
+  const delay = Math.max(
+    MODE_PERSIST_DEBOUNCE_MS,
+    MODE_PERSIST_MIN_INTERVAL_MS - sinceLastWrite
+  );
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    void flushPersist();
+  }, delay);
+}
 
-  const editors = new Set(tracked);
-  for (const editor of vscode.window.visibleTextEditors) editors.add(editor);
+async function flushPersist() {
+  if (persistRunning) return;
+  const target = persistTarget;
+  if (target === null) return;
+  persistTarget = null;
+  persistRunning = true;
+  lastPersistAt = Date.now();
+  // A settings update can emit configuration events for both the old and the
+  // new value. Keep those events from flipping the live display back while the
+  // write is in flight.
+  suppressModeEventsUntil = Date.now() + 2000;
 
-  for (const editor of editors) {
-    if (editor.document.isClosed) {
-      tracked.delete(editor);
-      continue;
-    }
-    if (mode === 'decimal') {
-      restoreNativeLineNumbers(editor);
-      clearDecorations(editor);
-    } else {
-      hideNativeLineNumbers(editor);
-      renderSafe(editor);
-    }
+  try {
+    await persistMode(target);
+    stats.persistWrites++;
+  } catch (err) {
+    stats.errors++;
+    console.error('[line-number-format] could not save the mode setting:', err);
+    vscode.window.showErrorMessage(
+      `Line Number Format: could not save the setting (${err instanceof Error ? err.message : String(err)}).`
+    );
+  } finally {
+    persistRunning = false;
+    suppressModeEventsUntil = Date.now() + MODE_EVENT_SETTLE_MS;
+    // The user may have switched again while the previous write was running.
+    if (persistTarget !== null) schedulePersistMode(persistTarget);
   }
 }
 
@@ -535,30 +621,13 @@ async function setMode(next, persist = true) {
   };
 
   if (changed) {
+    stats.modeChanges++;
     refreshAll();
   } else {
     updateStatusBar();
   }
 
-  if (persist) {
-    pendingMode = next;
-    if (pendingModeTimer !== null) {
-      clearTimeout(pendingModeTimer);
-      pendingModeTimer = null;
-    }
-    pendingModeTimer = setTimeout(() => {
-      if (pendingMode === next) pendingMode = null;
-      pendingModeTimer = null;
-    }, 1500);
-    try {
-      await persistMode(next);
-    } catch (err) {
-      console.error('[line-number-format] could not save the mode setting:', err);
-      vscode.window.showErrorMessage(
-        `Line Number Format: could not save the setting (${err instanceof Error ? err.message : String(err)}).`
-      );
-    }
-  }
+  if (persist) schedulePersistMode(next);
 }
 
 /* ------------------------------------------------------------------ */
@@ -624,22 +693,25 @@ function showDiagnostics() {
 
 function onConfigurationChanged(event) {
   if (event.affectsConfiguration('lineNumberFormat')) {
+    stats.configEvents++;
     const next = readStyle();
 
-    // VS Code can emit a configuration event with the previous value while a
-    // mode update is still settling. Ignore that stale mode so a fast mode
-    // switch followed by a far click cannot flip the display back mid-jump.
-    if (pendingMode && next.mode !== pendingMode) {
-      next.mode = mode;
-    } else if (pendingMode && next.mode === pendingMode) {
-      pendingMode = null;
-      if (pendingModeTimer !== null) {
-        clearTimeout(pendingModeTimer);
-        pendingModeTimer = null;
+    // A mode command updates the live display immediately and writes the
+    // setting shortly afterwards. Ignore any configuration event for that
+    // setting while the write is pending or settling; otherwise a burst of
+    // writes can deliver an older value after a newer one and flip the display
+    // back to the wrong mode.
+    let modeChanged = false;
+    if (next.mode !== mode) {
+      const settling =
+        persistTimer !== null || persistRunning || Date.now() < suppressModeEventsUntil;
+      if (settling) {
+        next.mode = mode;
+      } else {
+        modeChanged = true;
       }
     }
 
-    const modeChanged = next.mode !== mode;
     const formattingChanged = styleKey(next) !== styleKey(style);
 
     mode = next.mode;
@@ -653,11 +725,10 @@ function onConfigurationChanged(event) {
   }
 
   // Keep native numbers hidden if the user changes "editor.lineNumbers"
-  // while a custom format is active.
+  // while a custom format is active. Use the frame scheduler so a settings
+  // change cannot synchronously touch every visible editor.
   if (mode !== 'decimal' && event.affectsConfiguration('editor.lineNumbers')) {
-    for (const editor of vscode.window.visibleTextEditors) {
-      hideNativeLineNumbers(editor);
-    }
+    scheduleFullRefresh();
   }
 
   if (event.affectsConfiguration('editor.accessibilitySupport')) {
@@ -704,11 +775,14 @@ function cleanup() {
     clearInterval(visiblePoll);
     visiblePoll = null;
   }
-  if (pendingModeTimer !== null) {
-    clearTimeout(pendingModeTimer);
-    pendingModeTimer = null;
+  if (persistTimer !== null) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
   }
-  pendingMode = null;
+  persistTarget = null;
+  persistRunning = false;
+  fullRefreshRequested = false;
+  focusLines.clear();
   scheduled.clear();
 
   for (const editor of Array.from(tracked)) {
@@ -745,19 +819,15 @@ function activate(context) {
     vscode.window.onDidChangeActiveTextEditor((editor) => {
       if (!editor) return;
       tracked.add(editor);
-      if (mode === 'decimal') {
-        restoreNativeLineNumbers(editor);
-      } else {
-        hideNativeLineNumbers(editor);
-        renderSafe(editor);
-      }
+      scheduleFullRefresh();
     }),
     vscode.window.onDidChangeWindowState((state) => {
       if (!state.focused || mode === 'decimal') return;
       // An inactive window can scroll under the pointer. Refresh every visible
-      // editor immediately when focus returns instead of waiting for the next
-      // visible-range notification.
-      for (const editor of vscode.window.visibleTextEditors) renderSafe(editor);
+      // editor when focus returns instead of waiting for the next visible-range
+      // notification. Keep it on the frame scheduler so a focus change cannot
+      // turn into another synchronous full render.
+      scheduleFullRefresh();
     }),
     vscode.window.onDidChangeTextEditorVisibleRanges((event) => {
       scheduleRender(event.textEditor);
@@ -765,8 +835,9 @@ function activate(context) {
     vscode.window.onDidChangeTextEditorSelection((event) => {
       if (mode !== 'decimal') {
         // The focus line lets a far click get labels immediately even if
-        // visibleRanges has not caught up yet.
-        renderSafe(event.textEditor, event.textEditor.selection.active.line);
+        // visibleRanges has not caught up yet. Bursts of drag-selection events
+        // coalesce into one render per frame instead of bypassing the throttle.
+        scheduleRender(event.textEditor, event.textEditor.selection.active.line);
       }
     }),
     vscode.workspace.onDidChangeTextDocument((event) => {
@@ -796,7 +867,15 @@ function activate(context) {
 }
 
 function deactivate() {
+  const pendingMode = persistTarget;
   cleanup();
+  // A reload can happen before the debounce timer fires. Persist the last
+  // requested mode instead of silently losing it.
+  if (pendingMode !== null) {
+    return persistMode(pendingMode).catch((err) => {
+      console.error('[line-number-format] could not save the mode on shutdown:', err);
+    });
+  }
 }
 
 module.exports = { activate, deactivate };

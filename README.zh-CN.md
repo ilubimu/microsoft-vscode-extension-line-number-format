@@ -32,15 +32,17 @@
 扩展通过 **GitHub Releases** 分发（暂未发布到 Marketplace）。
 
 1. 打开 [Latest Release](https://github.com/ilubimu/microsoft-vscode-extension-line-number-format/releases/latest)。
-2. 下载 `line-number-format-0.4.3.vsix`。
+2. 下载 `line-number-format-0.4.4.vsix`。
 3. VS Code → 扩展视图 → 右上角 `...` → **Install from VSIX...**，选择该文件。
 4. 或命令行：
 
    ```bash
-   code --install-extension line-number-format-0.4.3.vsix
+   code --install-extension line-number-format-0.4.4.vsix
    ```
 
 要求：**VS Code 1.80 或更高**（在 Windows 的 1.147 上测试）。如提示重载窗口，重载即可。
+
+## 使用
 
 ## 使用
 
@@ -102,14 +104,15 @@ VS Code 的扩展 API **不能替换原生 gutter 中的行号文本**，因此�
 
 ## 性能
 
-只装饰可见行及少量缓冲；行内选项、Map 和数组复用；滚动更新每帧最多一次（16 ms），光标移动立即更新当前行标签。
+只装饰可见行及少量缓冲；行内选项、Map 和数组复用；滚动和选区更新每帧最多一次（16 ms），光标移动在下一帧更新当前行标签。
 
 在 20 万行 / 7.1 MB 文本文件上的隔离测试：
 
 - 连续滚动时 0 行可见代码缺标签；
-- 当前行标签更新约 42–55 ms（含 CDP 往返）；
+- 当前行标签更新约 42–64 ms（含 CDP 往返）；
 - `Ctrl+End` 端到端约 70–100 ms；
-- 单次渲染约 0.5 ms / 53 个标签。
+- 单次渲染约 0.5 ms / 53 个标签；
+- 80 次快速十六进制/双显切换并穿插远距离跳转：命令延迟 p95 约 4 ms，扩展宿主事件循环最大卡顿约 20 ms，标签在数毫秒内追平。
 
 实际数字会随硬件、字体、其他扩展和文件大小变化。
 
@@ -124,7 +127,8 @@ src/                 扩展源码（纯 JavaScript）
 images/icon.png      扩展图标
 docs/                README 截图
 test/unit/           纯函数格式化测试
-test/visual/         CDP 驱动的 UI 测试和 VSIX 安装测试
+test/visual/         CDP 驱动的 UI 测试、压力测试和 VSIX 安装测试
+test/stress-helper/  仅压力测试使用的辅助扩展
 test/fixtures/       示例 .asm/.c/.txt
 test/setup-runtime.ps1  把本机 VS Code 复制到 _test-runtime
 tools/build-vsix.js  无依赖的 VSIX 打包脚本
@@ -141,19 +145,20 @@ powershell -ExecutionPolicy Bypass -File test\setup-runtime.ps1
 set ELECTRON_RUN_AS_NODE=1
 ..\_test-runtime\vscode\Code.exe test\unit\run.js
 ..\_test-runtime\vscode\Code.exe test\visual\run-visual-test.js
+..\_test-runtime\vscode\Code.exe test\visual\run-stress-test.js
 ..\_test-runtime\vscode\Code.exe tools\build-vsix.js
 ..\_test-runtime\vscode\Code.exe test\visual\run-vsix-test.js
 ```
 
-视觉测试会在 `_test-runtime` 下生成 20 万行样本，并把截图写入 `test-output/`（均已 gitignore）。`test/setup-runtime.ps1` 支持 `-VsCodePath` 指定 VS Code 安装位置。
+视觉测试会在 `_test-runtime` 下生成 20 万行样本，并把截图写入 `test-output/`（均已 gitignore）。压力测试会在同一个大文件上快速切换 80 次十六进制/双显并穿插远距离跳转，然后在切换后立即拖动真实滚动条。可用 `LNF_STRESS_CYCLES`、`LNF_STRESS_INTERVAL_MS` 调整负载；`LNF_STRESS_A11Y=off` 用于测试纯十六进制列（而不是读屏回退）。`test/setup-runtime.ps1` 支持 `-VsCodePath` 指定 VS Code 安装位置。
 
 ### 打包
 
-`tools/build-vsix.js` 生成 `dist/line-number-format-0.4.3.vsix`，不依赖 npm 或 `vsce`。
+`tools/build-vsix.js` 生成 `dist/line-number-format-0.4.4.vsix`，不依赖 npm 或 `vsce`。
 
 ## 更新日志
 
-见 [CHANGELOG.md](CHANGELOG.md)。**0.4.3 是第一个公开发布版本。**
+见 [CHANGELOG.md](CHANGELOG.md)。**0.4.3 是第一个公开发布版本；0.4.4 修复快速切换模式与滚动时的卡顿和刷新延迟。**
 
 ## License
 

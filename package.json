@@ -2,7 +2,7 @@
   "name": "line-number-format",
   "displayName": "Line Number Format (Decimal / Hexadecimal)",
   "description": "Choose how editor line numbers are shown: decimal only, hexadecimal only, or decimal and hexadecimal together.",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "publisher": "local-tools",
   "license": "MIT",
   "icon": "images/icon.png",
@@ -131,6 +131,7 @@
   "scripts": {
     "test:unit": "node test/unit/run.js",
     "test:visual": "node test/visual/run-visual-test.js",
+    "test:stress": "node test/visual/run-stress-test.js",
     "test:vsix": "node test/visual/run-vsix-test.js",
     "build:vsix": "node tools/build-vsix.js"
   }
